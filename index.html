@@ -1,0 +1,777 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>EMDR online</title>
+<style>
+:root{color-scheme:dark}
+*{box-sizing:border-box}
+body{margin:0;background:#0b0f14;color:#e8eef4;font:15px/1.35 system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif}
+.hidden{display:none!important}
+.screen{min-height:100vh}
+button,input{font:inherit}
+button{border:1px solid #2b3947;background:#151d26;color:#e8eef4;border-radius:10px;padding:10px 14px;cursor:pointer}
+button:hover{background:#1d2733}
+button:disabled{opacity:.45;cursor:default}
+button.primary{background:#19c39a;color:#052018;border-color:transparent;font-weight:700}
+button.active{outline:2px solid #19c39a;outline-offset:2px}
+input[type=range]{width:100%}
+input[type=text]{background:#151d26;border:1px solid #2b3947;color:#e8eef4;border-radius:10px;padding:10px 12px;letter-spacing:.12em;text-transform:uppercase}
+header{display:flex;gap:10px;align-items:center;padding:10px 14px;border-bottom:1px solid #202b36;flex-wrap:wrap}
+main{display:grid;grid-template-columns:300px 1fr;gap:14px;padding:14px;height:calc(100vh - 56px)}
+.controls{display:grid;gap:12px;align-content:start}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+canvas{display:block;width:100%;height:100%;min-height:280px;background:#000;border:1px solid #202b36;border-radius:12px}
+#home{display:grid;place-items:center;padding:20px;text-align:center}
+#homeCard{max-width:420px;display:grid;gap:12px}
+#client{background:#000}
+#clientCanvas{position:fixed;inset:0;width:100vw;height:100vh;border:0;border-radius:0}
+#clientTop{position:fixed;left:12px;top:12px;z-index:3;color:#8fa3b5;background:rgba(0,0,0,.45);padding:6px 10px;border-radius:999px;font-size:12px}
+#clientExit{position:fixed;right:12px;top:12px;z-index:3;border-radius:999px;width:38px;height:38px;padding:0}
+#clientOverlay{position:fixed;inset:0;z-index:4;display:grid;place-items:center;background:rgba(0,0,0,.72);text-align:center;padding:20px}
+#clientOverlay button{font-size:18px;padding:16px 22px;border-radius:999px}
+small{color:#8fa3b5}
+@media(max-width:820px){main{grid-template-columns:1fr;height:auto}canvas{min-height:42vh}}
+</style>
+</head>
+<body>
+
+<div id="home" class="screen">
+  <div id="homeCard">
+    <h2>EMDR online</h2>
+    <small>Терапевт управляет, клиент видит шарик на своём устройстве.</small>
+    <button class="primary" id="homeTherapist">Я терапевт</button>
+    <div class="grid2">
+      <input id="clientCodeInput" type="text" placeholder="КОД" maxlength="6" aria-label="Код сессии">
+      <button id="homeClient">Я клиент</button>
+    </div>
+  </div>
+</div>
+
+<div id="therapist" class="screen hidden">
+  <header>
+    <button id="backHome">←</button>
+    <strong>Терапевт</strong>
+    <b id="tCode" style="letter-spacing:.12em;color:#19c39a"></b>
+    <button id="copyLink">Ссылка</button>
+    <span style="margin-left:auto" id="tStatus">…</span>
+  </header>
+
+  <main>
+    <section class="controls">
+      <div>
+        <small>Направление</small>
+        <div class="grid2" id="patterns">
+          <button type="button" data-pattern="lr" class="active">Влево-вправо</button>
+          <button type="button" data-pattern="ud">Вверх-вниз</button>
+          <button type="button" data-pattern="d1">Диагональ ↘</button>
+          <button type="button" data-pattern="d2">Диагональ ↗</button>
+        </div>
+      </div>
+
+      <label>Скорость: <b id="speedOut">0.60</b> Гц
+        <input id="speed" type="range" min="0.2" max="2" step="0.05" value="0.6">
+      </label>
+
+      <label>Амплитуда: <b id="ampOut">90</b>%
+        <input id="amp" type="range" min="20" max="95" step="1" value="90">
+      </label>
+
+      <label><input id="sound" type="checkbox" checked> Звук на границах</label>
+
+      <div class="grid2">
+        <button class="primary" id="start">Старт</button>
+        <button id="pause">Пауза</button>
+        <button id="stop">Стоп</button>
+        <button id="testSound">Тест звука</button>
+      </div>
+
+      <small>Space — старт/пауза, Esc — стоп.</small>
+    </section>
+
+    <canvas id="preview"></canvas>
+  </main>
+</div>
+
+<div id="client" class="screen hidden">
+  <canvas id="clientCanvas"></canvas>
+  <div id="clientTop">подключение…</div>
+  <button id="clientExit" title="Выйти">×</button>
+  <div id="clientOverlay">
+    <div>
+      <button class="primary" id="clientStart">Включить звук и полный экран</button>
+      <p><small>Нужно одно касание: браузер разрешает звук только после действия.</small></p>
+    </div>
+  </div>
+</div>
+
+<script>
+(() => {
+  const $ = id => document.getElementById(id);
+  const screens = ['home','therapist','client'];
+  const ALPH = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
+  const newCode = () => Array.from({length:6}, () => ALPH[Math.random()*ALPH.length|0]).join('');
+
+  const state = {
+    pattern:'lr',
+    speed:0.6,
+    amp:0.9,
+    sound:true,
+    running:false,
+    epoch:0,
+    phase:0,
+    code:''
+  };
+
+  let mode = 'home';
+  let peer = null;
+  let conn = null;
+  let conns = new Map();
+  let offset = 0;
+  let prevHalf = null;
+  let netRole = '';
+  let netCode = '';
+  let peerReady = false;
+  let timeTimer = 0;
+  let stateTimer = 0;
+  let retries = 0;
+  let audioCtx = null;
+
+  function show(name){
+    mode = name;
+    screens.forEach(s => $(s).classList.toggle('hidden', s !== name));
+    if(name === 'client') $('clientOverlay').classList.remove('hidden');
+  }
+
+  function setTStatus(t){ $('tStatus').textContent = t; }
+  function setCStatus(t){ $('clientTop').textContent = t; }
+
+  function parseHash(){
+    const raw = location.hash.replace(/^#\/?/, '');
+    const parts = raw.split('/');
+    return {
+      role: parts[0] || '',
+      code: (parts[1] || '').toUpperCase().replace(/[^A-Z0-9]/g,'').slice(0,6)
+    };
+  }
+
+  function route(){
+    const { role, code } = parseHash();
+
+    if(role === 't'){
+      state.code = code || localStorage.getItem('emdrOnlineCode') || newCode();
+      localStorage.setItem('emdrOnlineCode', state.code);
+
+      const target = '#/t/' + state.code;
+      if(location.hash !== target) history.replaceState(null, '', target);
+
+      show('therapist');
+      syncUI();
+      ensureTherapistNet();
+    } else if(role === 'c' && code){
+      state.code = code;
+      show('client');
+      ensureClientNet();
+    } else {
+      show('home');
+      cleanupNet();
+    }
+  }
+
+  function syncUI(){
+    $('tCode').textContent = state.code || '';
+    $('speedOut').textContent = state.speed.toFixed(2);
+    $('ampOut').textContent = Math.round(state.amp * 100);
+    $('speed').value = state.speed;
+    $('amp').value = Math.round(state.amp * 100);
+    $('sound').checked = state.sound;
+
+    document.querySelectorAll('#patterns button').forEach(b => {
+      b.classList.toggle('active', b.dataset.pattern === state.pattern);
+    });
+
+    $('start').disabled = state.running;
+    $('pause').disabled = !state.running;
+  }
+
+  function mod1(x){ return ((x % 1) + 1) % 1; }
+
+  function currentPhase(){
+    if(!state.running) return state.phase;
+    return mod1(((Date.now() - state.epoch) / 1000) * state.speed);
+  }
+
+  function clientPhase(){
+    if(!state.running) return state.phase;
+    return mod1((((Date.now() + offset) - state.epoch) / 1000) * state.speed);
+  }
+
+  function setPattern(p){
+    state.pattern = p;
+    prevHalf = null;
+    sendState();
+    syncUI();
+  }
+
+  function setSpeed(v){
+    const ph = currentPhase();
+    state.speed = v;
+
+    if(state.running){
+      state.epoch = Date.now() - (ph / v) * 1000;
+    } else {
+      state.phase = ph;
+    }
+
+    sendState();
+    syncUI();
+  }
+
+  function start(){
+    if(state.running) return;
+    state.epoch = Date.now();
+    state.running = true;
+    prevHalf = null;
+    sendState();
+    syncUI();
+  }
+
+  function pause(){
+    if(!state.running) return;
+    state.phase = currentPhase();
+    state.running = false;
+    prevHalf = null;
+    sendState();
+    syncUI();
+  }
+
+  function stop(){
+    state.running = false;
+    state.phase = 0;
+    prevHalf = null;
+    sendState();
+    syncUI();
+  }
+
+  function statePayload(){
+    return {
+      type: 'state',
+      state: {
+        pattern: state.pattern,
+        speed: state.speed,
+        amp: state.amp,
+        sound: state.sound,
+        running: state.running,
+        epoch: state.epoch,
+        phase: state.phase
+      }
+    };
+  }
+
+  function sendState(){
+    if(mode !== 'therapist') return;
+    const msg = statePayload();
+    conns.forEach(c => {
+      if(c && c.open){
+        try{ c.send(msg); }catch(e){}
+      }
+    });
+  }
+
+  function sendStateTo(c){
+    if(c && c.open){
+      try{ c.send(statePayload()); }catch(e){}
+    }
+  }
+
+  function cleanupNet(){
+    clearInterval(timeTimer);
+    clearInterval(stateTimer);
+    timeTimer = stateTimer = 0;
+
+    if(conn){
+      try{ conn.close(); }catch(e){}
+      conn = null;
+    }
+
+    conns.forEach(c => {
+      try{ c.close(); }catch(e){}
+    });
+    conns.clear();
+
+    if(peer){
+      try{ peer.destroy(); }catch(e){}
+      peer = null;
+    }
+
+    netRole = '';
+    netCode = '';
+    retries = 0;
+    offset = 0;
+    prevHalf = null;
+  }
+
+  function ensureTherapistNet(){
+    if(!peerReady){
+      setTStatus('загрузка P2P…');
+      return;
+    }
+    if(netRole === 't' && netCode === state.code) return;
+
+    cleanupNet();
+    netRole = 't';
+    netCode = state.code;
+    host();
+  }
+
+  function ensureClientNet(){
+    if(!peerReady){
+      setCStatus('загрузка P2P…');
+      return;
+    }
+    if(netRole === 'c' && netCode === state.code) return;
+
+    cleanupNet();
+    netRole = 'c';
+    netCode = state.code;
+    join();
+  }
+
+  function refreshNet(){
+    if(mode === 'therapist') ensureTherapistNet();
+    if(mode === 'client') ensureClientNet();
+  }
+
+  function host(){
+    if(!window.Peer) return;
+
+    peer = new Peer('emdr-' + state.code, { debug: 0 });
+    setTStatus('подключение к релею…');
+
+    peer.on('open', () => setTStatus('ожидание клиента'));
+
+    peer.on('connection', c => {
+      c.on('open', () => {
+        conns.set(c.peer, c);
+        setTStatus('клиентов: ' + conns.size);
+        sendStateTo(c);
+      });
+
+      c.on('data', d => onTherapistData(d, c));
+
+      c.on('close', () => {
+        conns.delete(c.peer);
+        setTStatus('клиентов: ' + conns.size);
+      });
+
+      c.on('error', () => {
+        conns.delete(c.peer);
+        setTStatus('клиентов: ' + conns.size);
+      });
+    });
+
+    peer.on('disconnected', () => {
+      try{ peer.reconnect(); }catch(e){}
+    });
+
+    peer.on('error', e => {
+      if(e.type === 'unavailable-id'){
+        state.code = newCode();
+        localStorage.setItem('emdrOnlineCode', state.code);
+        history.replaceState(null, '', '#/t/' + state.code);
+        syncUI();
+        setTStatus('код занят, новый: ' + state.code);
+
+        setTimeout(() => {
+          cleanupNet();
+          ensureTherapistNet();
+        }, 600);
+      } else if(e.type === 'network' || e.type === 'server-error'){
+        setTStatus('релей недоступен');
+      } else {
+        setTStatus('ошибка: ' + e.type);
+      }
+    });
+
+    stateTimer = setInterval(sendState, 2000);
+  }
+
+  function onTherapistData(msg, c){
+    if(!msg) return;
+
+    if(msg.type === 'ready'){
+      sendStateTo(c);
+    }
+
+    if(msg.type === 'timeReq' && c && c.open){
+      try{
+        c.send({
+          type: 'timeResp',
+          t1: msg.t1,
+          t2: Date.now(),
+          t3: Date.now()
+        });
+      }catch(e){}
+    }
+  }
+
+  function join(){
+    if(!window.Peer) return;
+
+    setCStatus('подключение…');
+    peer = new Peer({ debug: 0 });
+
+    peer.on('open', connectToTherapist);
+
+    peer.on('disconnected', () => {
+      try{ peer.reconnect(); }catch(e){}
+    });
+
+    peer.on('error', e => {
+      if(e.type === 'peer-unavailable'){
+        setCStatus('ждём терапевта…');
+        scheduleRetry();
+      } else if(e.type === 'network' || e.type === 'server-error'){
+        setCStatus('сеть недоступна');
+        scheduleRetry();
+      } else {
+        setCStatus('ошибка: ' + e.type);
+      }
+    });
+  }
+
+  function connectToTherapist(){
+    if(!peer || peer.destroyed) return;
+
+    if(conn){
+      try{ conn.close(); }catch(e){}
+      conn = null;
+    }
+
+    conn = peer.connect('emdr-' + state.code, {
+      reliable: true,
+      serialization: 'json'
+    });
+
+    conn.on('open', () => {
+      setCStatus('связь есть');
+      retries = 0;
+
+      try{ conn.send({ type: 'ready' }); }catch(e){}
+      try{ conn.send({ type: 'timeReq', t1: Date.now() }); }catch(e){}
+
+      clearInterval(timeTimer);
+      timeTimer = setInterval(() => {
+        if(conn && conn.open){
+          try{ conn.send({ type: 'timeReq', t1: Date.now() }); }catch(e){}
+        }
+      }, 3000);
+    });
+
+    conn.on('data', onClientData);
+
+    conn.on('close', () => {
+      setCStatus('связь закрыта');
+      scheduleRetry();
+    });
+
+    conn.on('error', () => scheduleRetry());
+  }
+
+  function scheduleRetry(){
+    if(retries++ > 30){
+      setCStatus('нет связи');
+      return;
+    }
+
+    setTimeout(() => {
+      if(mode !== 'client') return;
+
+      if(peer && !peer.destroyed){
+        connectToTherapist();
+      } else {
+        ensureClientNet();
+      }
+    }, 2000);
+  }
+
+  function onClientData(msg){
+    if(!msg) return;
+
+    if(msg.type === 'state'){
+      Object.assign(state, msg.state);
+      prevHalf = null;
+      setCStatus(state.running ? 'движение' : 'пауза');
+    }
+
+    if(msg.type === 'timeResp'){
+      const t4 = Date.now();
+      offset = ((msg.t2 - msg.t1) + (msg.t3 - t4)) / 2;
+    }
+  }
+
+  function ensureAudio(){
+    if(!audioCtx){
+      const AC = window.AudioContext || window.webkitAudioContext;
+      if(AC) audioCtx = new AC();
+    }
+    if(audioCtx && audioCtx.state === 'suspended'){
+      audioCtx.resume();
+    }
+  }
+
+  function beep(panValue){
+    if(!state.sound || !audioCtx) return;
+
+    const t = audioCtx.currentTime;
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(1200, t);
+
+    gain.gain.setValueAtTime(0.0001, t);
+    gain.gain.exponentialRampToValueAtTime(0.18, t + 0.004);
+    gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.08);
+
+    let tail = gain;
+
+    if(audioCtx.createStereoPanner){
+      const pan = audioCtx.createStereoPanner();
+      pan.pan.value = Math.max(-1, Math.min(1, panValue * 0.8));
+      gain.connect(pan);
+      tail = pan;
+    }
+
+    osc.connect(gain);
+    tail.connect(audioCtx.destination);
+
+    osc.start(t);
+    osc.stop(t + 0.09);
+  }
+
+  function pos(p){
+    const c = Math.cos(Math.PI * 2 * p);
+
+    if(state.pattern === 'ud') return { x: 0, y: -c };
+    if(state.pattern === 'd1') return { x: -c, y: -c };
+    if(state.pattern === 'd2') return { x: -c, y: c };
+
+    return { x: -c, y: 0 };
+  }
+
+  function fit(canvas){
+    const dpr = Math.min(2, window.devicePixelRatio || 1);
+    const r = canvas.getBoundingClientRect();
+    const w = Math.max(1, r.width);
+    const h = Math.max(1, r.height);
+
+    const cw = Math.round(w * dpr);
+    const ch = Math.round(h * dpr);
+
+    if(canvas.width !== cw || canvas.height !== ch){
+      canvas.width = cw;
+      canvas.height = ch;
+    }
+
+    const ctx = canvas.getContext('2d');
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+    return { ctx, w, h };
+  }
+
+  function draw(canvas, phase, makeSound){
+    const { ctx, w, h } = fit(canvas);
+
+    ctx.fillStyle = '#000';
+    ctx.fillRect(0, 0, w, h);
+
+    const r = Math.min(w, h) * 0.04;
+    const pad = r * 1.5;
+
+    const p = pos(phase);
+    const x = w / 2 + p.x * state.amp * (w / 2 - pad);
+    const y = h / 2 + p.y * state.amp * (h / 2 - pad);
+
+    ctx.strokeStyle = 'rgba(255,255,255,0.08)';
+    ctx.strokeRect(pad, pad, w - pad * 2, h - pad * 2);
+
+    const g = ctx.createRadialGradient(
+      x - r * 0.3,
+      y - r * 0.3,
+      r * 0.1,
+      x,
+      y,
+      r
+    );
+    g.addColorStop(0, '#fff');
+    g.addColorStop(1, '#d7dee5');
+
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    ctx.arc(x, y, r, 0, Math.PI * 2);
+    ctx.fill();
+
+    if(makeSound && state.running && state.sound){
+      const half = Math.floor(phase * 2) % 2;
+
+      if(prevHalf !== null && half !== prevHalf){
+        beep(p.x);
+      }
+
+      prevHalf = half;
+    } else {
+      prevHalf = null;
+    }
+  }
+
+  function loop(){
+    requestAnimationFrame(loop);
+
+    if(mode === 'therapist'){
+      draw($('preview'), currentPhase(), false);
+    }
+
+    if(mode === 'client'){
+      draw($('clientCanvas'), clientPhase(), true);
+    }
+  }
+
+  function activateClient(){
+    ensureAudio();
+    $('clientOverlay').classList.add('hidden');
+
+    if(document.documentElement.requestFullscreen && !document.fullscreenElement){
+      document.documentElement.requestFullscreen().catch(() => {});
+    }
+  }
+
+  $('homeTherapist').addEventListener('click', () => {
+    location.hash = '#/t';
+  });
+
+  $('homeClient').addEventListener('click', () => {
+    const code = $('clientCodeInput').value
+      .toUpperCase()
+      .replace(/[^A-Z0-9]/g, '')
+      .slice(0, 6);
+
+    if(code) location.hash = '#/c/' + code;
+  });
+
+  $('clientCodeInput').addEventListener('input', e => {
+    e.target.value = e.target.value
+      .toUpperCase()
+      .replace(/[^A-Z0-9]/g, '')
+      .slice(0, 6);
+  });
+
+  $('backHome').addEventListener('click', () => {
+    location.hash = '';
+  });
+
+  $('copyLink').addEventListener('click', async () => {
+    const link = location.href.split('#')[0] + '#/c/' + state.code;
+
+    try{
+      await navigator.clipboard.writeText(link);
+      $('copyLink').textContent = 'Скопировано';
+      setTimeout(() => $('copyLink').textContent = 'Ссылка', 1200);
+    }catch(e){
+      prompt('Ссылка для клиента:', link);
+    }
+  });
+
+  $('patterns').addEventListener('click', e => {
+    const b = e.target.closest('button[data-pattern]');
+    if(b) setPattern(b.dataset.pattern);
+  });
+
+  $('speed').addEventListener('input', e => {
+    setSpeed(parseFloat(e.target.value));
+  });
+
+  $('amp').addEventListener('input', e => {
+    state.amp = parseInt(e.target.value, 10) / 100;
+    sendState();
+    syncUI();
+  });
+
+  $('sound').addEventListener('change', e => {
+    state.sound = e.target.checked;
+    sendState();
+  });
+
+  $('start').addEventListener('click', start);
+  $('pause').addEventListener('click', pause);
+  $('stop').addEventListener('click', stop);
+
+  $('testSound').addEventListener('click', () => {
+    ensureAudio();
+    beep(0);
+  });
+
+  $('clientStart').addEventListener('click', activateClient);
+  $('clientExit').addEventListener('click', () => {
+    location.hash = '';
+  });
+
+  window.addEventListener('hashchange', route);
+
+  window.addEventListener('keydown', e => {
+    if(mode === 'therapist' && !/INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName)){
+      if(e.code === 'Space'){
+        e.preventDefault();
+        state.running ? pause() : start();
+      }
+
+      if(e.key === 'Escape'){
+        stop();
+      }
+    }
+
+    if(mode === 'client' && e.code === 'Space'){
+      e.preventDefault();
+      activateClient();
+    }
+  });
+
+  function loadScript(src){
+    return new Promise((resolve, reject) => {
+      const s = document.createElement('script');
+      s.src = src;
+      s.async = true;
+      s.onload = resolve;
+      s.onerror = () => reject(new Error(src));
+      document.head.appendChild(s);
+    });
+  }
+
+  loadScript('https://cdn.jsdelivr.net/npm/peerjs@1.5.4/dist/peerjs.min.js')
+    .catch(() => loadScript('https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js'))
+    .catch(() => loadScript('./peerjs.min.js'))
+    .then(() => {
+      peerReady = !!window.Peer;
+      refreshNet();
+
+      if(!peerReady){
+        if(mode === 'therapist') setTStatus('P2P не загрузился');
+        if(mode === 'client') setCStatus('P2P не загрузился');
+      }
+    })
+    .catch(() => {
+      peerReady = false;
+
+      if(mode === 'therapist') setTStatus('P2P не загрузился');
+      if(mode === 'client') setCStatus('P2P не загрузился');
+    });
+
+  route();
+  syncUI();
+  loop();
+})();
+</script>
+
+</body>
+</html>
