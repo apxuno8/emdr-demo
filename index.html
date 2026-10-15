@@ -124,18 +124,18 @@ small{color:#8fa3b5}
     code:''
   };
 
+  const SUPABASE_URL = 'https://typkcfrafaooupxjpfvx.supabase.co';
+  const SUPABASE_KEY = 'sb_publishable_5qagXHVKM5fO-VXxCN6Z3Q_jUZIw2b5';
+
   let mode = 'home';
-  let peer = null;
-  let conn = null;
-  let conns = new Map();
+  let sb = null;
+  let channel = null;
   let offset = 0;
   let prevHalf = null;
   let netRole = '';
   let netCode = '';
-  let peerReady = false;
   let timeTimer = 0;
   let stateTimer = 0;
-  let retries = 0;
   let audioCtx = null;
 
   function show(name){
@@ -254,35 +254,23 @@ small{color:#8fa3b5}
     syncUI();
   }
 
-  function statePayload(){
+  function snapshot(){
     return {
-      type: 'state',
-      state: {
-        pattern: state.pattern,
-        speed: state.speed,
-        amp: state.amp,
-        sound: state.sound,
-        running: state.running,
-        epoch: state.epoch,
-        phase: state.phase
-      }
+      pattern: state.pattern,
+      speed: state.speed,
+      amp: state.amp,
+      sound: state.sound,
+      running: state.running,
+      epoch: state.epoch,
+      phase: state.phase
     };
   }
 
   function sendState(){
-    if(mode !== 'therapist') return;
-    const msg = statePayload();
-    conns.forEach(c => {
-      if(c && c.open){
-        try{ c.send(msg); }catch(e){}
-      }
-    });
-  }
-
-  function sendStateTo(c){
-    if(c && c.open){
-      try{ c.send(statePayload()); }catch(e){}
-    }
+    if(mode !== 'therapist' || !channel) return;
+    try{
+      channel.send({ type: 'broadcast', event: 'state', payload: snapshot() });
+    }catch(e){}
   }
 
   function cleanupNet(){
@@ -290,31 +278,20 @@ small{color:#8fa3b5}
     clearInterval(stateTimer);
     timeTimer = stateTimer = 0;
 
-    if(conn){
-      try{ conn.close(); }catch(e){}
-      conn = null;
+    if(channel && sb){
+      try{ sb.removeChannel(channel); }catch(e){}
     }
-
-    conns.forEach(c => {
-      try{ c.close(); }catch(e){}
-    });
-    conns.clear();
-
-    if(peer){
-      try{ peer.destroy(); }catch(e){}
-      peer = null;
-    }
+    channel = null;
 
     netRole = '';
     netCode = '';
-    retries = 0;
     offset = 0;
     prevHalf = null;
   }
 
   function ensureTherapistNet(){
-    if(!peerReady){
-      setTStatus('загрузка P2P…');
+    if(!sb){
+      setTStatus('Supabase не настроен');
       return;
     }
     if(netRole === 't' && netCode === state.code) return;
@@ -326,8 +303,8 @@ small{color:#8fa3b5}
   }
 
   function ensureClientNet(){
-    if(!peerReady){
-      setCStatus('загрузка P2P…');
+    if(!sb){
+      setCStatus('Supabase не настроен');
       return;
     }
     if(netRole === 'c' && netCode === state.code) return;
@@ -343,172 +320,110 @@ small{color:#8fa3b5}
     if(mode === 'client') ensureClientNet();
   }
 
+  function channelName(){
+    return 'emdr-' + state.code;
+  }
+
+  function countPresence(role){
+    if(!channel) return 0;
+    const st = channel.presenceState();
+    let n = 0;
+    Object.keys(st).forEach(k => {
+      st[k].forEach(p => { if(p.role === role) n++; });
+    });
+    return n;
+  }
+
   function host(){
-    if(!window.Peer) return;
+    if(!sb) return;
 
-    peer = new Peer('emdr-' + state.code, { debug: 0 });
-    setTStatus('подключение к релею…');
+    setTStatus('подключение…');
 
-    peer.on('open', () => setTStatus('ожидание клиента'));
-
-    peer.on('connection', c => {
-      c.on('open', () => {
-        conns.set(c.peer, c);
-        setTStatus('клиентов: ' + conns.size);
-        sendStateTo(c);
-      });
-
-      c.on('data', d => onTherapistData(d, c));
-
-      c.on('close', () => {
-        conns.delete(c.peer);
-        setTStatus('клиентов: ' + conns.size);
-      });
-
-      c.on('error', () => {
-        conns.delete(c.peer);
-        setTStatus('клиентов: ' + conns.size);
-      });
+    channel = sb.channel(channelName(), {
+      config: {
+        broadcast: { self: false },
+        presence: { key: 'therapist' }
+      }
     });
 
-    peer.on('disconnected', () => {
-      try{ peer.reconnect(); }catch(e){}
+    channel.on('broadcast', { event: 'hello' }, () => sendState());
+
+    channel.on('broadcast', { event: 'timeReq' }, ({ payload }) => {
+      const now = Date.now();
+      try{
+        channel.send({
+          type: 'broadcast',
+          event: 'timeResp',
+          payload: { t1: payload && payload.t1, t2: now, t3: now }
+        });
+      }catch(e){}
     });
 
-    peer.on('error', e => {
-      if(e.type === 'unavailable-id'){
-        state.code = newCode();
-        localStorage.setItem('emdrOnlineCode', state.code);
-        history.replaceState(null, '', '#/t/' + state.code);
-        syncUI();
-        setTStatus('код занят, новый: ' + state.code);
+    channel.on('presence', { event: 'sync' }, () => {
+      const n = countPresence('client');
+      setTStatus(n ? ('клиентов: ' + n) : 'ожидание клиента');
+    });
 
-        setTimeout(() => {
-          cleanupNet();
-          ensureTherapistNet();
-        }, 600);
-      } else if(e.type === 'network' || e.type === 'server-error'){
-        setTStatus('релей недоступен');
-      } else {
-        setTStatus('ошибка: ' + e.type);
+    channel.subscribe(status => {
+      if(status === 'SUBSCRIBED'){
+        try{ channel.track({ role: 'therapist' }); }catch(e){}
+        setTStatus('ожидание клиента');
+        sendState();
+      } else if(status === 'CHANNEL_ERROR' || status === 'TIMED_OUT'){
+        setTStatus('нет связи с сервером');
       }
     });
 
     stateTimer = setInterval(sendState, 2000);
   }
 
-  function onTherapistData(msg, c){
-    if(!msg) return;
-
-    if(msg.type === 'ready'){
-      sendStateTo(c);
-    }
-
-    if(msg.type === 'timeReq' && c && c.open){
-      try{
-        c.send({
-          type: 'timeResp',
-          t1: msg.t1,
-          t2: Date.now(),
-          t3: Date.now()
-        });
-      }catch(e){}
-    }
-  }
-
   function join(){
-    if(!window.Peer) return;
+    if(!sb) return;
 
     setCStatus('подключение…');
-    peer = new Peer({ debug: 0 });
 
-    peer.on('open', connectToTherapist);
-
-    peer.on('disconnected', () => {
-      try{ peer.reconnect(); }catch(e){}
-    });
-
-    peer.on('error', e => {
-      if(e.type === 'peer-unavailable'){
-        setCStatus('ждём терапевта…');
-        scheduleRetry();
-      } else if(e.type === 'network' || e.type === 'server-error'){
-        setCStatus('сеть недоступна');
-        scheduleRetry();
-      } else {
-        setCStatus('ошибка: ' + e.type);
+    channel = sb.channel(channelName(), {
+      config: {
+        broadcast: { self: false },
+        presence: { key: 'client-' + Math.random().toString(36).slice(2, 8) }
       }
     });
-  }
 
-  function connectToTherapist(){
-    if(!peer || peer.destroyed) return;
-
-    if(conn){
-      try{ conn.close(); }catch(e){}
-      conn = null;
-    }
-
-    conn = peer.connect('emdr-' + state.code, {
-      reliable: true,
-      serialization: 'json'
-    });
-
-    conn.on('open', () => {
-      setCStatus('связь есть');
-      retries = 0;
-
-      try{ conn.send({ type: 'ready' }); }catch(e){}
-      try{ conn.send({ type: 'timeReq', t1: Date.now() }); }catch(e){}
-
-      clearInterval(timeTimer);
-      timeTimer = setInterval(() => {
-        if(conn && conn.open){
-          try{ conn.send({ type: 'timeReq', t1: Date.now() }); }catch(e){}
-        }
-      }, 3000);
-    });
-
-    conn.on('data', onClientData);
-
-    conn.on('close', () => {
-      setCStatus('связь закрыта');
-      scheduleRetry();
-    });
-
-    conn.on('error', () => scheduleRetry());
-  }
-
-  function scheduleRetry(){
-    if(retries++ > 30){
-      setCStatus('нет связи');
-      return;
-    }
-
-    setTimeout(() => {
-      if(mode !== 'client') return;
-
-      if(peer && !peer.destroyed){
-        connectToTherapist();
-      } else {
-        ensureClientNet();
-      }
-    }, 2000);
-  }
-
-  function onClientData(msg){
-    if(!msg) return;
-
-    if(msg.type === 'state'){
-      Object.assign(state, msg.state);
+    channel.on('broadcast', { event: 'state' }, ({ payload }) => {
+      if(!payload) return;
+      Object.assign(state, payload);
       prevHalf = null;
       setCStatus(state.running ? 'движение' : 'пауза');
-    }
+    });
 
-    if(msg.type === 'timeResp'){
+    channel.on('broadcast', { event: 'timeResp' }, ({ payload }) => {
+      if(!payload) return;
       const t4 = Date.now();
-      offset = ((msg.t2 - msg.t1) + (msg.t3 - t4)) / 2;
-    }
+      offset = ((payload.t2 - payload.t1) + (payload.t3 - t4)) / 2;
+    });
+
+    channel.on('presence', { event: 'sync' }, () => {
+      setCStatus(countPresence('therapist') ? 'связь есть' : 'ждём терапевта…');
+    });
+
+    channel.subscribe(status => {
+      if(status === 'SUBSCRIBED'){
+        try{ channel.track({ role: 'client' }); }catch(e){}
+        try{ channel.send({ type: 'broadcast', event: 'hello', payload: {} }); }catch(e){}
+        setCStatus('ждём терапевта…');
+
+        clearInterval(timeTimer);
+        timeTimer = setInterval(() => {
+          try{
+            channel.send({ type: 'broadcast', event: 'timeReq', payload: { t1: Date.now() } });
+          }catch(e){}
+        }, 3000);
+      } else if(status === 'CHANNEL_ERROR' || status === 'TIMED_OUT'){
+        setCStatus('нет связи с сервером');
+      } else if(status === 'CLOSED'){
+        setCStatus('связь закрыта');
+      }
+    });
   }
 
   function ensureAudio(){
@@ -748,24 +663,35 @@ small{color:#8fa3b5}
     });
   }
 
-  loadScript('https://cdn.jsdelivr.net/npm/peerjs@1.5.4/dist/peerjs.min.js')
-    .catch(() => loadScript('https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js'))
-    .catch(() => loadScript('./peerjs.min.js'))
-    .then(() => {
-      peerReady = !!window.Peer;
-      refreshNet();
+  function connectNet(){
+    if(!window.supabase || !window.supabase.createClient){
+      if(mode === 'therapist') setTStatus('клиент Supabase не загрузился');
+      if(mode === 'client') setCStatus('клиент Supabase не загрузился');
+      return;
+    }
 
-      if(!peerReady){
-        if(mode === 'therapist') setTStatus('P2P не загрузился');
-        if(mode === 'client') setCStatus('P2P не загрузился');
-      }
-    })
-    .catch(() => {
-      peerReady = false;
+    if(!SUPABASE_URL || SUPABASE_URL.indexOf('YOUR_') === 0 ||
+       !SUPABASE_KEY || SUPABASE_KEY.indexOf('YOUR_') === 0){
+      if(mode === 'therapist') setTStatus('укажите SUPABASE_URL и SUPABASE_KEY');
+      if(mode === 'client') setCStatus('Supabase не настроен');
+      return;
+    }
 
-      if(mode === 'therapist') setTStatus('P2P не загрузился');
-      if(mode === 'client') setCStatus('P2P не загрузился');
-    });
+    try{
+      sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
+        realtime: { params: { eventsPerSecond: 20 } }
+      });
+    }catch(e){
+      sb = null;
+    }
+
+    refreshNet();
+  }
+
+  loadScript('https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js')
+    .catch(() => loadScript('https://unpkg.com/@supabase/supabase-js@2/dist/umd/supabase.js'))
+    .catch(() => loadScript('./supabase.js'))
+    .then(connectNet, connectNet);
 
   route();
   syncUI();
