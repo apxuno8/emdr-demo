@@ -22,6 +22,10 @@ header{display:flex;gap:10px;align-items:center;padding:10px 14px;border-bottom:
 main{display:grid;grid-template-columns:300px 1fr;gap:14px;padding:14px;height:calc(100vh - 56px)}
 .controls{display:grid;gap:12px;align-content:start}
 .grid2{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.stats{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:4px 0 8px}
+.stat{background:#151d26;border:1px solid #2b3947;border-radius:10px;padding:8px;text-align:center;display:grid;gap:2px}
+.stat b{font-size:20px;color:#19c39a;font-variant-numeric:tabular-nums}
+.stat small{font-size:11px}
 canvas{display:block;width:100%;height:100%;min-height:280px;background:#000;border:1px solid #202b36;border-radius:12px}
 #home{display:grid;place-items:center;padding:20px;text-align:center}
 #homeCard{max-width:420px;display:grid;gap:12px}
@@ -60,6 +64,16 @@ small{color:#8fa3b5}
 
   <main>
     <section class="controls">
+      <div>
+        <small>Сессия</small>
+        <div class="stats">
+          <div class="stat"><b id="statTimer">00:00</b><small>Время</small></div>
+          <div class="stat"><b id="statPasses">0</b><small>Пасы</small></div>
+          <div class="stat"><b id="statSets">0</b><small>Сеты</small></div>
+        </div>
+        <button id="resetStats" type="button" style="width:100%">Сброс счётчиков</button>
+      </div>
+
       <div>
         <small>Направление</small>
         <div class="grid2" id="patterns">
@@ -137,6 +151,39 @@ small{color:#8fa3b5}
   let timeTimer = 0;
   let stateTimer = 0;
   let audioCtx = null;
+
+  let statsTime = 0;
+  let statPasses = 0;
+  let statSets = 0;
+  let prevPhase = null;
+  let lastTick = 0;
+  let lastTimerText = '';
+  let lastPassesText = -1;
+  let lastSetsText = -1;
+
+  function fmtTime(ms){
+    const total = Math.floor(ms / 1000);
+    const m = Math.floor(total / 60);
+    const s = total % 60;
+    return String(m).padStart(2, '0') + ':' + String(s).padStart(2, '0');
+  }
+
+  function renderStats(){
+    const t = fmtTime(statsTime);
+    if(t !== lastTimerText){ $('statTimer').textContent = t; lastTimerText = t; }
+    if(statPasses !== lastPassesText){ $('statPasses').textContent = statPasses; lastPassesText = statPasses; }
+    if(statSets !== lastSetsText){ $('statSets').textContent = statSets; lastSetsText = statSets; }
+  }
+
+  function resetStats(){
+    statsTime = 0;
+    statPasses = 0;
+    statSets = 0;
+    lastTimerText = '';
+    lastPassesText = -1;
+    lastSetsText = -1;
+    renderStats();
+  }
 
   function show(name){
     mode = name;
@@ -233,6 +280,7 @@ small{color:#8fa3b5}
     state.epoch = Date.now();
     state.running = true;
     prevHalf = null;
+    statSets++;
     sendState();
     syncUI();
   }
@@ -545,7 +593,24 @@ small{color:#8fa3b5}
     requestAnimationFrame(loop);
 
     if(mode === 'therapist'){
+      const now = Date.now();
+
+      if(state.running){
+        if(lastTick) statsTime += now - lastTick;
+
+        const ph = currentPhase();
+        if(prevPhase !== null && ph < prevPhase) statPasses++;
+        prevPhase = ph;
+      } else {
+        prevPhase = null;
+      }
+
+      lastTick = now;
+
       draw($('preview'), currentPhase(), false);
+      renderStats();
+    } else {
+      lastTick = 0;
     }
 
     if(mode === 'client'){
@@ -621,6 +686,7 @@ small{color:#8fa3b5}
   $('start').addEventListener('click', start);
   $('pause').addEventListener('click', pause);
   $('stop').addEventListener('click', stop);
+  $('resetStats').addEventListener('click', resetStats);
 
   $('testSound').addEventListener('click', () => {
     ensureAudio();
