@@ -18,6 +18,7 @@ button.primary{background:#19c39a;color:#052018;border-color:transparent;font-we
 button.active{outline:2px solid #19c39a;outline-offset:2px}
 input[type=range]{width:100%}
 input[type=text]{background:#151d26;border:1px solid #2b3947;color:#e8eef4;border-radius:10px;padding:10px 12px;letter-spacing:.12em;text-transform:uppercase}
+input[type=number]{background:#151d26;border:1px solid #2b3947;color:#e8eef4;border-radius:10px;padding:8px 10px;width:84px}
 header{display:flex;gap:10px;align-items:center;padding:10px 14px;border-bottom:1px solid #202b36;flex-wrap:wrap}
 main{display:grid;grid-template-columns:300px 1fr;gap:14px;padding:14px;height:calc(100vh - 56px)}
 .controls{display:grid;gap:12px;align-content:start}
@@ -94,6 +95,19 @@ small{color:#8fa3b5}
 
       <label><input id="sound" type="checkbox" checked> Звук на границах</label>
 
+      <div>
+        <small>Автостоп</small>
+        <div class="grid2" id="autoMode">
+          <button type="button" data-auto="passes" class="active">По пасам</button>
+          <button type="button" data-auto="secs">По секундам</button>
+        </div>
+        <label style="display:block;margin-top:8px">Через
+          <input id="autoValue" type="number" min="1" step="1" value="10">
+          <b id="autoUnit">пасов</b>
+        </label>
+        <label style="display:block;margin-top:8px"><input id="autoOn" type="checkbox"> Остановить автоматически</label>
+      </div>
+
       <div class="grid2">
         <button class="primary" id="start">Старт</button>
         <button id="pause">Пауза</button>
@@ -135,8 +149,11 @@ small{color:#8fa3b5}
     running:false,
     epoch:0,
     phase:0,
+    stopAt:0,
     code:''
   };
+
+  const STOP_DUR = 500;
 
   const SUPABASE_URL = 'https://typkcfrafaooupxjpfvx.supabase.co';
   const SUPABASE_KEY = 'sb_publishable_5qagXHVKM5fO-VXxCN6Z3Q_jUZIw2b5';
@@ -155,6 +172,10 @@ small{color:#8fa3b5}
   let statsTime = 0;
   let statPasses = 0;
   let statSets = 0;
+  let setActive = false;
+  let autoMode = 'passes';
+  let autoValue = 10;
+  let autoEnabled = false;
   let prevPhase = null;
   let lastTick = 0;
   let lastTimerText = '';
@@ -183,6 +204,20 @@ small{color:#8fa3b5}
     lastPassesText = -1;
     lastSetsText = -1;
     renderStats();
+  }
+
+  function stopFactor(t){
+    if(!state.stopAt) return 1;
+    return Math.max(0, Math.min(1, 1 - (t - state.stopAt) / STOP_DUR));
+  }
+
+  function checkAutoStop(){
+    if(!autoEnabled || !state.running || autoValue <= 0) return;
+    if(autoMode === 'passes'){
+      if(statPasses >= autoValue) stop();
+    } else {
+      if(statsTime >= autoValue * 1000) stop();
+    }
   }
 
   function show(name){
@@ -279,8 +314,9 @@ small{color:#8fa3b5}
     if(state.running) return;
     state.epoch = Date.now();
     state.running = true;
+    state.stopAt = 0;
+    setActive = true;
     prevHalf = null;
-    statSets++;
     sendState();
     syncUI();
   }
@@ -295,9 +331,15 @@ small{color:#8fa3b5}
   }
 
   function stop(){
+    state.phase = currentPhase();
+    state.stopAt = Date.now();
     state.running = false;
-    state.phase = 0;
     prevHalf = null;
+
+    if(setActive){ statSets++; setActive = false; }
+    statsTime = 0;
+    statPasses = 0;
+
     sendState();
     syncUI();
   }
@@ -310,7 +352,8 @@ small{color:#8fa3b5}
       sound: state.sound,
       running: state.running,
       epoch: state.epoch,
-      phase: state.phase
+      phase: state.phase,
+      stopAt: state.stopAt
     };
   }
 
@@ -515,13 +558,13 @@ small{color:#8fa3b5}
   }
 
   function pos(p){
-    const c = Math.cos(Math.PI * 2 * p);
+    const s = Math.sin(Math.PI * 2 * p);
 
-    if(state.pattern === 'ud') return { x: 0, y: -c };
-    if(state.pattern === 'd1') return { x: -c, y: -c };
-    if(state.pattern === 'd2') return { x: -c, y: c };
+    if(state.pattern === 'ud') return { x: 0, y: -s };
+    if(state.pattern === 'd1') return { x: -s, y: -s };
+    if(state.pattern === 'd2') return { x: -s, y: s };
 
-    return { x: -c, y: 0 };
+    return { x: -s, y: 0 };
   }
 
   function fit(canvas){
@@ -544,8 +587,9 @@ small{color:#8fa3b5}
     return { ctx, w, h };
   }
 
-  function draw(canvas, phase, makeSound){
+  function draw(canvas, phase, makeSound, factor){
     const { ctx, w, h } = fit(canvas);
+    const k = factor === undefined ? 1 : factor;
 
     ctx.fillStyle = '#000';
     ctx.fillRect(0, 0, w, h);
@@ -554,8 +598,8 @@ small{color:#8fa3b5}
     const pad = r * 1.5;
 
     const p = pos(phase);
-    const x = w / 2 + p.x * state.amp * (w / 2 - pad);
-    const y = h / 2 + p.y * state.amp * (h / 2 - pad);
+    const x = w / 2 + p.x * state.amp * k * (w / 2 - pad);
+    const y = h / 2 + p.y * state.amp * k * (h / 2 - pad);
 
     ctx.strokeStyle = 'rgba(255,255,255,0.08)';
     ctx.strokeRect(pad, pad, w - pad * 2, h - pad * 2);
@@ -577,7 +621,7 @@ small{color:#8fa3b5}
     ctx.fill();
 
     if(makeSound && state.running && state.sound){
-      const half = Math.floor(phase * 2) % 2;
+      const half = Math.floor(phase * 2 + 0.5) % 2;
 
       if(prevHalf !== null && half !== prevHalf){
         beep(p.x);
@@ -601,20 +645,22 @@ small{color:#8fa3b5}
         const ph = currentPhase();
         if(prevPhase !== null && ph < prevPhase) statPasses++;
         prevPhase = ph;
+
+        checkAutoStop();
       } else {
         prevPhase = null;
       }
 
       lastTick = now;
 
-      draw($('preview'), currentPhase(), false);
+      draw($('preview'), currentPhase(), false, stopFactor(now));
       renderStats();
     } else {
       lastTick = 0;
     }
 
     if(mode === 'client'){
-      draw($('clientCanvas'), clientPhase(), true);
+      draw($('clientCanvas'), clientPhase(), true, stopFactor(Date.now() + offset));
     }
   }
 
@@ -681,6 +727,22 @@ small{color:#8fa3b5}
   $('sound').addEventListener('change', e => {
     state.sound = e.target.checked;
     sendState();
+  });
+
+  $('autoMode').addEventListener('click', e => {
+    const b = e.target.closest('button[data-auto]');
+    if(!b) return;
+    autoMode = b.dataset.auto;
+    document.querySelectorAll('#autoMode button').forEach(x => x.classList.toggle('active', x === b));
+    $('autoUnit').textContent = autoMode === 'passes' ? 'пасов' : 'секунд';
+  });
+
+  $('autoValue').addEventListener('input', e => {
+    autoValue = parseInt(e.target.value, 10) || 0;
+  });
+
+  $('autoOn').addEventListener('change', e => {
+    autoEnabled = e.target.checked;
   });
 
   $('start').addEventListener('click', start);
