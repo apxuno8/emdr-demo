@@ -5,38 +5,41 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>EMDR online</title>
 <style>
-:root{color-scheme:dark}
+:root{color-scheme:light}
 *{box-sizing:border-box}
-body{margin:0;background:#0b0f14;color:#e8eef4;font:15px/1.35 system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif}
+body{margin:0;background:#faf6f1;color:#4b4238;font:15px/1.35 system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif}
 .hidden{display:none!important}
 .screen{min-height:100vh}
 button,input{font:inherit}
-button{border:1px solid #2b3947;background:#151d26;color:#e8eef4;border-radius:10px;padding:10px 14px;cursor:pointer}
-button:hover{background:#1d2733}
+button{border:1px solid #e6dccf;background:#fffdfb;color:#4b4238;border-radius:10px;padding:10px 14px;cursor:pointer}
+button:hover{background:#f3ece2}
 button:disabled{opacity:.45;cursor:default}
-button.primary{background:#19c39a;color:#052018;border-color:transparent;font-weight:700}
-button.active{outline:2px solid #19c39a;outline-offset:2px}
+button.primary{background:#8ecdb4;color:#1e3a2f;border-color:transparent;font-weight:700}
+button.active{outline:2px solid #8ecdb4;outline-offset:2px}
 input[type=range]{width:100%}
-input[type=text]{background:#151d26;border:1px solid #2b3947;color:#e8eef4;border-radius:10px;padding:10px 12px;letter-spacing:.12em;text-transform:uppercase}
-input[type=number]{background:#151d26;border:1px solid #2b3947;color:#e8eef4;border-radius:10px;padding:8px 10px;width:84px}
-header{display:flex;gap:10px;align-items:center;padding:10px 14px;border-bottom:1px solid #202b36;flex-wrap:wrap}
+input[type=text]{background:#fffdfb;border:1px solid #e6dccf;color:#4b4238;border-radius:10px;padding:10px 12px;letter-spacing:.12em;text-transform:uppercase}
+input[type=number]{background:#fffdfb;border:1px solid #e6dccf;color:#4b4238;border-radius:10px;padding:8px 10px;width:84px}
+header{display:flex;gap:10px;align-items:center;padding:10px 14px;border-bottom:1px solid #ece3d7;flex-wrap:wrap;background:#fdfaf6}
 main{display:grid;grid-template-columns:300px 1fr;gap:14px;padding:14px;height:calc(100vh - 56px)}
 .controls{display:grid;gap:12px;align-content:start}
 .grid2{display:grid;grid-template-columns:1fr 1fr;gap:8px}
 .stats{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:4px 0 8px}
-.stat{background:#151d26;border:1px solid #2b3947;border-radius:10px;padding:8px;text-align:center;display:grid;gap:2px}
-.stat b{font-size:20px;color:#19c39a;font-variant-numeric:tabular-nums}
+.stat{background:#fffdfb;border:1px solid #ece3d7;border-radius:10px;padding:8px;text-align:center;display:grid;gap:2px}
+.stat b{font-size:20px;color:#559a7e;font-variant-numeric:tabular-nums}
 .stat small{font-size:11px}
-canvas{display:block;width:100%;height:100%;min-height:280px;background:#000;border:1px solid #202b36;border-radius:12px}
+canvas{display:block;width:100%;height:100%;min-height:280px;background:#f3ede5;border:1px solid #ece3d7;border-radius:12px}
 #home{display:grid;place-items:center;padding:20px;text-align:center}
 #homeCard{max-width:420px;display:grid;gap:12px}
-#client{background:#000}
+#client{background:#f3ede5}
 #clientCanvas{position:fixed;inset:0;width:100vw;height:100vh;border:0;border-radius:0}
-#clientTop{position:fixed;left:12px;top:12px;z-index:3;color:#8fa3b5;background:rgba(0,0,0,.45);padding:6px 10px;border-radius:999px;font-size:12px}
+#clientTop{position:fixed;left:12px;top:12px;z-index:3;color:#8a7f70;background:rgba(255,253,251,.7);padding:6px 10px;border-radius:999px;font-size:12px}
 #clientExit{position:fixed;right:12px;top:12px;z-index:3;border-radius:999px;width:38px;height:38px;padding:0}
-#clientOverlay{position:fixed;inset:0;z-index:4;display:grid;place-items:center;background:rgba(0,0,0,.72);text-align:center;padding:20px}
+#clientOverlay{position:fixed;inset:0;z-index:4;display:grid;place-items:center;background:rgba(250,246,241,.88);text-align:center;padding:20px}
 #clientOverlay button{font-size:18px;padding:16px 22px;border-radius:999px}
-small{color:#8fa3b5}
+small{color:#9b8f80}
+.colors{display:grid;grid-template-columns:repeat(7,1fr);gap:6px}
+.swatch{width:100%;aspect-ratio:1;border-radius:999px;border:2px solid #e6dccf;padding:0;cursor:pointer}
+.swatch.active{outline:2px solid #8ecdb4;outline-offset:2px}
 @media(max-width:820px){main{grid-template-columns:1fr;height:auto}canvas{min-height:42vh}}
 </style>
 </head>
@@ -58,7 +61,7 @@ small{color:#8fa3b5}
   <header>
     <button id="backHome">←</button>
     <strong>Терапевт</strong>
-    <b id="tCode" style="letter-spacing:.12em;color:#19c39a"></b>
+    <b id="tCode" style="letter-spacing:.12em;color:#559a7e"></b>
     <button id="copyLink">Ссылка</button>
     <span style="margin-left:auto" id="tStatus">…</span>
   </header>
@@ -83,6 +86,11 @@ small{color:#8fa3b5}
           <button type="button" data-pattern="d1">Диагональ ↘</button>
           <button type="button" data-pattern="d2">Диагональ ↗</button>
         </div>
+      </div>
+
+      <div>
+        <small>Цвет шарика</small>
+        <div class="colors" id="colors"></div>
       </div>
 
       <label>Скорость: <b id="speedOut">0.60</b> Гц
@@ -141,11 +149,14 @@ small{color:#8fa3b5}
   const ALPH = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
   const newCode = () => Array.from({length:6}, () => ALPH[Math.random()*ALPH.length|0]).join('');
 
+  const BALL_COLORS = ['#f4a3a3','#f2c96b','#8ecdb4','#8fc0e0','#b9a6e0','#eaa6cf','#b9b0a3'];
+
   const state = {
     pattern:'lr',
     speed:0.6,
     amp:0.9,
     sound:true,
+    ballColor:BALL_COLORS[3],
     running:false,
     epoch:0,
     phase:0,
@@ -273,8 +284,38 @@ small{color:#8fa3b5}
       b.classList.toggle('active', b.dataset.pattern === state.pattern);
     });
 
+    document.querySelectorAll('#colors .swatch').forEach(b => {
+      b.classList.toggle('active', b.dataset.color === state.ballColor);
+    });
+
     $('start').disabled = state.running;
     $('pause').disabled = !state.running;
+  }
+
+  function shade(hex, amt){
+    const n = parseInt(hex.slice(1), 16);
+    const r = (n >> 16) & 255;
+    const g = (n >> 8) & 255;
+    const b = n & 255;
+    const t = amt < 0 ? 0 : 255;
+    const p = Math.abs(amt);
+    return 'rgb('
+      + Math.round((t - r) * p + r) + ','
+      + Math.round((t - g) * p + g) + ','
+      + Math.round((t - b) * p + b) + ')';
+  }
+
+  function buildColors(){
+    const box = $('colors');
+    BALL_COLORS.forEach(c => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'swatch';
+      b.dataset.color = c;
+      b.style.background = c;
+      b.title = c;
+      box.appendChild(b);
+    });
   }
 
   function mod1(x){ return ((x % 1) + 1) % 1; }
@@ -350,6 +391,7 @@ small{color:#8fa3b5}
       speed: state.speed,
       amp: state.amp,
       sound: state.sound,
+      ballColor: state.ballColor,
       running: state.running,
       epoch: state.epoch,
       phase: state.phase,
@@ -591,7 +633,7 @@ small{color:#8fa3b5}
     const { ctx, w, h } = fit(canvas);
     const k = factor === undefined ? 1 : factor;
 
-    ctx.fillStyle = '#000';
+    ctx.fillStyle = '#f3ede5';
     ctx.fillRect(0, 0, w, h);
 
     const r = Math.min(w, h) * 0.04;
@@ -601,9 +643,10 @@ small{color:#8fa3b5}
     const x = w / 2 + p.x * state.amp * k * (w / 2 - pad);
     const y = h / 2 + p.y * state.amp * k * (h / 2 - pad);
 
-    ctx.strokeStyle = 'rgba(255,255,255,0.08)';
+    ctx.strokeStyle = 'rgba(0,0,0,0.06)';
     ctx.strokeRect(pad, pad, w - pad * 2, h - pad * 2);
 
+    const color = state.ballColor || BALL_COLORS[3];
     const g = ctx.createRadialGradient(
       x - r * 0.3,
       y - r * 0.3,
@@ -612,8 +655,8 @@ small{color:#8fa3b5}
       y,
       r
     );
-    g.addColorStop(0, '#fff');
-    g.addColorStop(1, '#d7dee5');
+    g.addColorStop(0, shade(color, 0.55));
+    g.addColorStop(1, shade(color, -0.12));
 
     ctx.fillStyle = g;
     ctx.beginPath();
@@ -712,6 +755,14 @@ small{color:#8fa3b5}
   $('patterns').addEventListener('click', e => {
     const b = e.target.closest('button[data-pattern]');
     if(b) setPattern(b.dataset.pattern);
+  });
+
+  $('colors').addEventListener('click', e => {
+    const b = e.target.closest('.swatch');
+    if(!b) return;
+    state.ballColor = b.dataset.color;
+    sendState();
+    syncUI();
   });
 
   $('speed').addEventListener('input', e => {
@@ -821,6 +872,7 @@ small{color:#8fa3b5}
     .catch(() => loadScript('./supabase.js'))
     .then(connectNet, connectNet);
 
+  buildColors();
   route();
   syncUI();
   loop();
